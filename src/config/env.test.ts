@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { EnvValidationError, validatePublicEnv, validateServerEnv } from "./env";
 
 describe("environment validation", () => {
-  it("accepts a valid public Supabase configuration", () => {
+  it("accepts a valid public Supabase configuration with safe defaults", () => {
     expect(
       validatePublicEnv({
         NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co",
@@ -11,6 +11,10 @@ describe("environment validation", () => {
     ).toEqual({
       supabaseUrl: "https://example.supabase.co",
       supabasePublishableKey: "sb_publishable_example",
+      siteUrl: "http://localhost:3000",
+      brandName: "NewsOS",
+      publisherName: undefined,
+      contactEmail: undefined,
     });
   });
 
