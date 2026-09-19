@@ -1,0 +1,51 @@
+name: Bootstrap verified NewsOS source
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/bootstrap-source.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout bootstrap data
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Reconstruct and verify source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat             .bootstrap/source.part00             .bootstrap/source.part01             .bootstrap/source.part02             .bootstrap/source.part03             .bootstrap/gapA             .bootstrap/source.part04             .bootstrap/gapB             .bootstrap/source.part05             .bootstrap/gapC             .bootstrap/source.part06             .bootstrap/gapD             .bootstrap/source.part07             .bootstrap/gapE             > /tmp/newsos-source.b64
+          test "$(wc -c < /tmp/newsos-source.b64)" -eq 143140
+          base64 -d /tmp/newsos-source.b64 > /tmp/newsos-source.tar.gz
+          echo "7614bc688d0de7ee5cfb941e140dd5471fa291a89f01a08d158ff3785909dea7  /tmp/newsos-source.tar.gz" | sha256sum -c -
+          mkdir -p /tmp/newsos-source
+          tar -xzf /tmp/newsos-source.tar.gz -C /tmp/newsos-source
+          test -f /tmp/newsos-source/package.json
+          test -f /tmp/newsos-source/src/app/page.tsx
+
+      - name: Sync verified source to feature branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin feat/phases-1-16
+          git checkout -B feat/phases-1-16 origin/feat/phases-1-16
+          git rm -rf . >/dev/null 2>&1 || true
+          cp -a /tmp/newsos-source/. .
+          git add -A
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --cached --quiet; then
+            echo "No source changes to commit."
+          else
+            git commit -m "feat: sync verified NewsOS source"
+          fi
+          git push origin HEAD:feat/phases-1-16
