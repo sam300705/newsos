@@ -1,6 +1,6 @@
 import "server-only";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { enqueueJob, ensureSourceForUrl, getGlobalAutomationConfig, recordAudit, upsertDiscoveredUrl } from "@/lib/db/admin-repository";
+import { enqueueJob, ensureSourceForUrl, getGlobalAutomationConfig, upsertDiscoveredUrl } from "@/lib/db/admin-repository";
 import { fetchFeed } from "@/lib/rss/fetch-feed";
 import { TavilyClient } from "@/lib/tavily/client";
 import { OpenAICompatibleProvider } from "@/lib/ai/provider";
@@ -269,7 +269,6 @@ async function handleExtractClaims(payload: any) {
   const prompt = renderPrompt(promptVersion.user, { storyTitle: story.canonical_title ?? "Untitled story", sourceBlock });
   const result = await provider.generateJson<any>({ system: promptVersion.system, prompt, schemaName: "story_claims_v1" });
   const validDocumentIds = new Set(sources.map((row:any)=>row.source_documents.id));
-  const sourceMap = new Map(sources.map((row:any)=>[row.source_documents.id,row]));
   let supportedCount = 0;
   const createdClaimIds: string[] = [];
 
