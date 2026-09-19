@@ -1,0 +1,1 @@
+import type { MetadataRoute } from "next"; import { getPublicEnv } from "@/config/env"; export default function robots():MetadataRoute.Robots{const site=getPublicEnv().siteUrl; return {rules:[{userAgent:'*',allow:'/',disallow:['/admin/','/api/cron/']}],sitemap:`${site}/sitemap.xml`,host:site}}

@@ -1,0 +1,3 @@
+export function TrustPanel({ sourceCount, primaryCount, lastVerified, corrections }: { sourceCount: number; primaryCount: number; lastVerified?: string | null; corrections: number }) {
+  return <aside className="trust-panel"><div><span className="trust-label">Verification</span><strong>{sourceCount} sources checked</strong></div><div><span>Primary sources</span><strong>{primaryCount}</strong></div><div><span>Corrections</span><strong>{corrections}</strong></div><div><span>Last verified</span><strong>{lastVerified ? new Date(lastVerified).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "Pending"}</strong></div></aside>;
+}

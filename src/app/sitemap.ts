@@ -1,0 +1,5 @@
+import type { MetadataRoute } from "next";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { getPublicEnv } from "@/config/env";
+export const dynamic='force-dynamic';
+export default async function sitemap():Promise<MetadataRoute.Sitemap>{const site=getPublicEnv().siteUrl; const base=['','latest','search','about','contact','editorial-policy','corrections'].map(path=>({url:`${site}/${path}`.replace(/\/$/,path?'':'/'),lastModified:new Date(),changeFrequency:'daily' as const,priority:path?0.7:1})); try{const db=await createServerSupabaseClient(); const [{data:articles},{data:companies}]=await Promise.all([db.from('articles').select('slug,updated_at').in('status',['PUBLISHED','CORRECTED']).limit(5000),db.from('companies').select('slug,updated_at').limit(5000)]); return [...base,...(articles??[]).map((a:any)=>({url:`${site}/story/${a.slug}`,lastModified:new Date(a.updated_at),changeFrequency:'daily' as const,priority:.8})),...(companies??[]).map((c:any)=>({url:`${site}/company/${c.slug}`,lastModified:new Date(c.updated_at),changeFrequency:'weekly' as const,priority:.6}))];}catch{return base;}}

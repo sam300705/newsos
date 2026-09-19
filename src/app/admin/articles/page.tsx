@@ -1,0 +1,4 @@
+import Link from "next/link";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+export const dynamic='force-dynamic';
+export default async function Articles(){const db=createAdminSupabaseClient(); const {data,error}=await db.from('articles').select('id,story_id,headline,slug,status,published_at,updated_at').order('updated_at',{ascending:false}).limit(250); if(error)throw error; return <><div className="admin-head"><div><p className="eyebrow">PUBLICATION WORKFLOW</p><h1>Articles</h1></div></div><div className="admin-table headed"><div><strong>Article</strong><strong>Status</strong><strong>Updated</strong></div>{(data??[]).map((a:any)=><Link key={a.id} href={`/admin/story/${a.story_id}`}><span>{a.headline}</span><span>{a.status}</span><span>{new Date(a.updated_at).toLocaleString('en-IN')}</span></Link>)}</div></>}

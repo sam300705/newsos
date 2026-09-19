@@ -1,0 +1,3 @@
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+export const dynamic='force-dynamic';
+export default async function Claims(){const db=createAdminSupabaseClient(); const {data,error}=await db.from('claims').select('id,story_id,claim_text,claim_type,status,confidence,verified_at,stories(canonical_title)').order('created_at',{ascending:false}).limit(300); if(error)throw error; return <><div className="admin-head"><div><p className="eyebrow">CLAIM LEDGER</p><h1>Claims</h1></div></div><div className="claims-ledger">{(data??[]).map((c:any)=><div className={`claim-row ${String(c.status).toLowerCase()}`} key={c.id}><span>{c.status} · {c.confidence} · {c.claim_type}</span><p>{c.claim_text}</p><small>{c.stories?.canonical_title}</small></div>)}</div></>}

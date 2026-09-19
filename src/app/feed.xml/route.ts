@@ -1,0 +1,5 @@
+import { getPublishedArticles } from "@/lib/db/public-repository";
+import { getPublicEnv } from "@/config/env";
+export const dynamic='force-dynamic';
+const esc=(v:string)=>v.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&apos;"}[c]||c));
+export async function GET(){const site=getPublicEnv().siteUrl; const rows=await getPublishedArticles(50); const items=rows.map((a:any)=>`<item><title>${esc(a.headline)}</title><link>${site}/story/${esc(a.slug)}</link><guid isPermaLink="true">${site}/story/${esc(a.slug)}</guid><description>${esc(a.summary??'')}</description><pubDate>${a.published_at?new Date(a.published_at).toUTCString():new Date().toUTCString()}</pubDate></item>`).join(''); const xml=`<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>${esc(getPublicEnv().brandName)}</title><link>${site}</link><description>Trust-first technology and business intelligence</description>${items}</channel></rss>`; return new Response(xml,{headers:{'content-type':'application/rss+xml; charset=utf-8','cache-control':'public, max-age=300'}})}
