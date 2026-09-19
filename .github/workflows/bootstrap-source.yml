@@ -39,7 +39,7 @@ jobs:
           git fetch origin feat/phases-1-16
           git checkout -B feat/phases-1-16 origin/feat/phases-1-16
           git rm -rf . >/dev/null 2>&1 || true
-          cp -a /tmp/newsos-source/. .
+          rsync -a --exclude=".github/workflows/" /tmp/newsos-source/ ./
           git add -A
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
