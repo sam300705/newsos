@@ -1,0 +1,53 @@
+name: Live Netlify smoke
+on:
+  push:
+    branches: ["ops/live-smoke"]
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Public routes
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://newsos.netlify.app"
+          for path in / /about /contact /latest /login /feed.xml /news-sitemap.xml /robots.txt /api/health; do
+            code="$(curl -sS -o /tmp/body -w "%{http_code}" "$base$path")"
+            echo "$path -> $code"
+            test "$code" = "200"
+          done
+
+      - name: Contact form exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS https://newsos.netlify.app/contact | grep -q 'newsos-contact'
+
+      - name: Admin is protected
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(curl -sS -o /dev/null -w "%{http_code}" https://newsos.netlify.app/admin)"
+          echo "/admin -> $code"
+          case "$code" in 301|302|303|307|308) exit 0;; *) exit 1;; esac
+
+      - name: Cron rejects missing credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(curl -sS -o /tmp/cron-body -w "%{http_code}" https://newsos.netlify.app/api/cron/run)"
+          cat /tmp/cron-body
+          echo
+          echo "/api/cron/run -> $code"
+          test "$code" = "401"
+
+      - name: Security headers and TLS
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSI https://newsos.netlify.app/ | tee /tmp/headers
+          grep -qi '^strict-transport-security:' /tmp/headers
+          grep -qi '^x-content-type-options:' /tmp/headers
