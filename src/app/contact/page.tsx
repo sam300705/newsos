@@ -9,7 +9,7 @@ export default function Contact() {
       <h1>Contact {env.brandName}</h1>
       <p>
         Use this channel for editorial questions, correction requests, source concerns, or general contact.
-        Submissions are handled through the publication's hosting platform and are not exposed publicly.
+        Submissions are handled through the publication&apos;s hosting platform and are not exposed publicly.
       </p>
 
       <form
