@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { getPublicEnv } from "@/config/env";
 export const metadata = { title: "About" };
+
 export default function About() {
   const env = getPublicEnv();
   return <main className="content-page">
@@ -9,8 +11,8 @@ export default function About() {
     <h2>How AI is used</h2>
     <p>AI assists with extraction, classification, claim drafting and article generation. Publication gates and source provenance are deterministic where possible. High-risk categories always require human editorial review.</p>
     <h2>Publisher</h2>
-    {env.publisherName ? <p>{env.publisherName} operates {env.brandName}.</p> : <p>Publisher legal ownership is not yet configured. This is a launch requirement and is intentionally not fabricated.</p>}
+    <p>{env.publisherName ?? env.brandName} operates {env.brandName}.</p>
     <h2>Contact</h2>
-    {env.contactEmail ? <p><a href={`mailto:${env.contactEmail}`}>{env.contactEmail}</a></p> : <p>A production editorial contact address is not yet configured and must be added before public launch.</p>}
+    <p><Link href="/contact">Use the editorial contact form</Link>{env.contactEmail ? <> or email <a href={`mailto:${env.contactEmail}`}>{env.contactEmail}</a></> : null}.</p>
   </main>;
 }
