@@ -55,3 +55,7 @@ Local Phase 1 command evidence is in `../testing/final-verification.md`; it does
 
 - [ ] Production publish explicitly authorized by owner.
 - [ ] Controlled auto-publish remains disabled until shadow metrics justify deliberate activation.
+
+## Phase 3 candidate
+
+The versioned passage/human-review/atomic-publication candidate is documented in [Phase 3 verification](../testing/phase-3-evidence-publication.md). Local replay includes 16 migrations and 131 SQL assertions. Full native Supabase concurrency acceptance is the PR database CI result; live project/Auth/provider acceptance remains blocked. No auto-publication, deployment or merge is authorized by a passing disposable database check.

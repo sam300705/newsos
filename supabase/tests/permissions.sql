@@ -43,12 +43,17 @@ insert into public.story_sources(story_id,document_id,relationship) values
 insert into public.claims(id,story_id,claim_text,claim_type,status) values
 ('50000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','Published claim','FACT','SUPPORTED'),
 ('50000000-0000-0000-0000-000000000002','40000000-0000-0000-0000-000000000002','Private claim','FACT','SUPPORTED');
+-- Superuser-only seeding of historical published fixtures; API roles cannot disable triggers.
+alter table public.articles disable trigger article_safety;
+alter table public.article_citations disable trigger citation_safety;
 insert into public.articles(id,story_id,slug,status,headline) values
 ('60000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','test-published','PUBLISHED','Published article'),
 ('60000000-0000-0000-0000-000000000002','40000000-0000-0000-0000-000000000002','test-draft','DRAFT','Draft article');
 insert into public.article_citations(article_id,claim_id,document_id,article_locator) values
 ('60000000-0000-0000-0000-000000000001','50000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','paragraph1'),
 ('60000000-0000-0000-0000-000000000002','50000000-0000-0000-0000-000000000002','30000000-0000-0000-0000-000000000002','paragraph1');
+alter table public.articles enable trigger article_safety;
+alter table public.article_citations enable trigger citation_safety;
 insert into public.user_preferences(user_id,preferences) values
 ('00000000-0000-0000-0000-000000000001','{"owner":1}'),
 ('00000000-0000-0000-0000-000000000002','{"owner":2}');

@@ -5,12 +5,9 @@ import { fetchFeed } from "@/lib/rss/fetch-feed";
 import { TavilyClient } from "@/lib/tavily/client";
 import { OpenAICompatibleProvider } from "@/lib/ai/provider";
 import { getActivePrompt, renderPrompt } from "@/lib/ai/prompts";
-import { aggregateEntities } from "@/core/entities";
 import { stableHash } from "@/core/url";
 import { shouldCluster, tokenSetSimilarity } from "@/core/dedupe";
 import { scoreNewsworthiness, DEFAULT_NEWSWORTHINESS_WEIGHTS } from "@/core/newsworthiness";
-import { scoreConfidence, confidenceBand } from "@/core/confidence";
-import { runPublicationGate } from "@/core/publication-gate";
 import { evaluateAutonomy, isHighRiskCategory } from "@/core/autonomy";
 import { AveiroPublishingAdapter } from "@/lib/publishing/aveiro";
 import { retryDelayMs, shouldDeadLetter, makeIdempotencyKey } from "@/core/jobs";
@@ -18,7 +15,8 @@ import { isJobAllowedByFlags } from "@/core/automation-flags";
 import { classifyBudget, shouldDeferForBudget } from "@/core/budget";
 import { estimateTavilyCost } from "@/core/costs";
 import { getOptionalIntegrationEnv } from "@/config/env";
-import type { ConfidenceInput, StorySignalInput } from "@/domain/types";
+import type { StorySignalInput } from "@/domain/types";
+import { composeStructuredDraft, sourceVersion, validateClaimCandidates } from "@/core/evidence";
 import { logger } from "@/lib/observability/logger";
 
 const db = () => createAdminSupabaseClient();
@@ -255,160 +253,78 @@ async function handleResearchStory(payload: any) {
       await client.from("audit_logs").insert({ action: "TAVILY_RESEARCH_RESULT", target_type: "story", target_id: story.id, after_data: { snapshot: JSON.stringify(research).slice(0,10000) } });
     } catch (error) { await logTavily("RESEARCH", story.id, started, false); throw error; }
   }
-  await enqueueJob("EXTRACT_CLAIMS", makeIdempotencyKey("claims", [story.id]), { storyId: story.id });
+  await enqueueJob("EXTRACT_CLAIMS", makeIdempotencyKey("claims", [story.id, stableHash(JSON.stringify(sources.map((r:any)=>[r.source_documents.id,sourceVersion(String(r.source_documents.content_text??""))]).sort()))]), { storyId: story.id });
   return { storyId: story.id, sourceCount: sources.length };
 }
 
 async function handleExtractClaims(payload: any) {
   const client = db();
+  const flags = await getGlobalAutomationConfig();
+  if (flags.flags.evidence_draft_workflow !== true) throw new Error("Evidence draft workflow paused");
   const { story, sources } = await loadStoryResearch(payload.storyId);
-  if (!sources.length) throw new Error("Cannot extract claims without source documents");
+  const documents = sources.map((row: any) => ({ id: row.source_documents.id, content: String(row.source_documents.content_text ?? "") }));
+  if (!documents.length) throw new Error("Cannot extract claims without source documents");
   const provider = new OpenAICompatibleProvider();
   const promptVersion = await getActivePrompt("extract_claims");
-  const sourceBlock = sources.map((row:any,index:number)=>`SOURCE ${index+1} | id=${row.source_documents.id} | url=${row.source_documents.canonical_url}\n${String(row.source_documents.content_text ?? '').slice(0,12000)}`).join("\n\n");
-  const prompt = renderPrompt(promptVersion.user, { storyTitle: story.canonical_title ?? "Untitled story", sourceBlock });
-  const result = await provider.generateJson<any>({ system: promptVersion.system, prompt, schemaName: "story_claims_v1" });
-  const validDocumentIds = new Set(sources.map((row:any)=>row.source_documents.id));
-  let supportedCount = 0;
-  const createdClaimIds: string[] = [];
-
-  for (const claim of result.value.claims ?? []) {
-    const supporting = (claim.supportingDocumentIds ?? []).filter((id:string)=>validDocumentIds.has(id));
-    const contradicting = (claim.contradictingDocumentIds ?? []).filter((id:string)=>validDocumentIds.has(id));
-    const primary = (claim.primaryDocumentIds ?? []).filter((id:string)=>validDocumentIds.has(id));
-    const status = contradicting.length ? "CONFLICTED" : primary.length ? "PRIMARY_SOURCE_VERIFIED" : supporting.length >= 2 ? "MULTI_SOURCE_SUPPORTED" : supporting.length === 1 ? "SUPPORTED" : "UNVERIFIED";
-    const confidence = status === "PRIMARY_SOURCE_VERIFIED" ? 95 : status === "MULTI_SOURCE_SUPPORTED" ? 88 : status === "SUPPORTED" ? 72 : status === "CONFLICTED" ? 40 : 20;
-    const { data: row, error } = await client.from("claims").insert({ story_id: story.id, claim_text: String(claim.text).slice(0,4000), claim_type: String(claim.type ?? "FACT"), status, confidence, verification_method: "AI_EXTRACTION_DETERMINISTIC_EVIDENCE", verified_at: status === "UNVERIFIED" ? null : new Date().toISOString() }).select("id").single();
-    if (error) throw error;
-    createdClaimIds.push(row.id);
-    for (const docId of supporting) await client.from("claim_evidence").insert({ claim_id: row.id, document_id: docId, stance: "SUPPORTS", is_primary: primary.includes(docId), extraction_confidence: 0.85 });
-    for (const docId of contradicting) await client.from("claim_evidence").insert({ claim_id: row.id, document_id: docId, stance: "CONTRADICTS", is_primary: primary.includes(docId), extraction_confidence: 0.85 });
-    for (const docId of primary) await client.from("story_sources").update({ relationship: "PRIMARY_EVIDENCE" }).eq("story_id", story.id).eq("document_id", docId);
-    if (["SUPPORTED","MULTI_SOURCE_SUPPORTED","PRIMARY_SOURCE_VERIFIED"].includes(status)) supportedCount++;
-  }
-
-  const extractedEntities = (result.value.entities ?? []).flatMap((entity:any) => (entity.documentIds ?? []).filter((id:string)=>validDocumentIds.has(id)).map((documentId:string)=>({ name:String(entity.name??''), type:String(entity.type??'OTHER').toUpperCase(), confidence:.8, sourceId:documentId })));
-  for (const entity of aggregateEntities(extractedEntities)) {
-    if (!entity.canonicalName) continue;
-    const { data: entityRow, error: entityError } = await client.from("entities").upsert({ entity_type: entity.type, canonical_name: entity.aliases[0] ?? entity.canonicalName, normalized_name: entity.canonicalName, aliases: entity.aliases }, { onConflict: "entity_type,normalized_name" }).select("*").single();
-    if (entityError) throw entityError;
-    await client.from("story_entities").upsert({ story_id: story.id, entity_id: entityRow.id, relationship: "MENTIONS", confidence: entity.confidence, evidence_source_ids: entity.sourceIds }, { onConflict: "story_id,entity_id,relationship" });
-    if (entity.type === "COMPANY") {
-      const slug = entity.canonicalName.replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,100) || entityRow.id;
-      await client.from("companies").upsert({ id: entityRow.id, slug, last_verified_at: new Date().toISOString() }, { onConflict: "id" });
-    }
-  }
-
-  const claimsResult = await client.from("claims").select("status,confidence").eq("story_id", story.id);
-  const claims = claimsResult.data ?? [];
-  const sourceAuthorities = sources.map((r:any)=>Number(r.source_documents?.sources?.authority_score ?? 0.5));
-  const input: ConfidenceInput = {
-    primarySourceEvidence: claims.some((c:any)=>c.status==='PRIMARY_SOURCE_VERIFIED') ? 1 : 0,
-    independentCorroboration: Math.min(1, sources.length/3),
-    sourceAuthority: sourceAuthorities.length ? sourceAuthorities.reduce((a:number,b:number)=>a+b,0)/sourceAuthorities.length : 0.5,
-    claimAgreement: claims.length ? claims.filter((c:any)=>c.status!=='CONFLICTED').length/claims.length : 0,
-    extractionQuality: 0.85,
-    recency: 0.8,
-    contradictionPenalty: claims.length ? claims.filter((c:any)=>c.status==='CONFLICTED').length/claims.length : 0,
-    missingFieldPenalty: supportedCount ? 0 : 1,
-  };
-  const confidence = scoreConfidence(input);
-  const { data: aiRun } = await client.from("ai_runs").insert({ story_id: story.id, operation: "EXTRACT_CLAIMS", provider: result.provider, model: result.model, prompt_version_id: promptVersion.id, output_json: { claimsCreated: createdClaimIds.length, entitiesCreated: extractedEntities.length }, input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens, latency_ms: result.latencyMs, estimated_cost_usd: result.estimatedCostUsd, success: true }).select("id").single();
-  if (aiRun) await client.from("llm_usage").insert({ ai_run_id: aiRun.id, provider: result.provider, model: result.model, input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens, estimated_cost_usd: result.estimatedCostUsd });
-  const config = await getGlobalAutomationConfig();
-  const thresholds = config.config["confidence.thresholds"] as any;
-  await client.from("confidence_scores").insert({ story_id: story.id, score: confidence.score, inputs: input, components: confidence.components, band: confidenceBand(confidence.score, thresholds && Number.isFinite(Number(thresholds.autoEligible)) ? { autoEligible:Number(thresholds.autoEligible), quickReview:Number(thresholds.quickReview), manualReview:Number(thresholds.manualReview) } : undefined) });
-  await client.from("stories").update({ confidence_score: confidence.score, status: supportedCount ? "VERIFIED" : "RESEARCHING", last_verified_at: new Date().toISOString() }).eq("id", story.id);
-  if (supportedCount) await enqueueJob("GENERATE_ARTICLE", makeIdempotencyKey("article", [story.id]), { storyId: story.id });
-  return { claims: claims.length, entities: extractedEntities.length, confidence: confidence.score };
+  const sourceBlock = documents.map(d => JSON.stringify({ id: d.id, sourceVersion: sourceVersion(d.content), content: Array.from(d.content).slice(0, 12000).join("") })).join("\n");
+  const result = await provider.generateJson<unknown>({ system: promptVersion.system, prompt: renderPrompt(promptVersion.user, { storyTitle: story.canonical_title ?? "Untitled", sourceBlock }), schemaName: "passage_claims_v2" });
+  const candidates = validateClaimCandidates(result.value, documents);
+  const inputHash = sourceVersion(JSON.stringify(documents.map(d => ({ id: d.id, version: sourceVersion(d.content) })).sort((a,b) => a.id.localeCompare(b.id))));
+  const { data, error } = await client.rpc("store_claim_candidates", { p_story_id: story.id, p_input_hash: inputHash, p_claims: candidates.claims });
+  if (error) throw error;
+  // Candidate passages are not entailment proof. Only human review can promote them.
+  const { data: aiRun, error: logError } = await client.from("ai_runs").insert({ story_id: story.id, operation: "EXTRACT_CLAIMS", provider: result.provider, model: result.model, prompt_version_id: promptVersion.id, input_hash: inputHash, output_json: { claimSetId: data, claimsCreated: candidates.claims.length, humanReviewRequired: true }, input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens, latency_ms: result.latencyMs, estimated_cost_usd: result.estimatedCostUsd, success: true }).select("id").single();
+  if (logError) throw logError;
+  const { error: usageError } = await client.from("llm_usage").insert({ ai_run_id: aiRun.id, provider: result.provider, model: result.model, input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens, estimated_cost_usd: result.estimatedCostUsd });
+  if (usageError) throw usageError;
+  return { claimSetId: data, humanReviewRequired: true };
 }
 
 async function handleGenerateArticle(payload: any) {
   const client = db();
-  const [{ data: story, error }, { data: claims, error: claimError }] = await Promise.all([
-    client.from("stories").select("*").eq("id", payload.storyId).single(),
-    client.from("claims").select("id,claim_text,status,confidence").eq("story_id", payload.storyId).in("status", ["SUPPORTED","MULTI_SOURCE_SUPPORTED","PRIMARY_SOURCE_VERIFIED"]),
-  ]);
-  if (error) throw error; if (claimError) throw claimError;
-  if (!claims?.length) throw new Error("No verified claims available for article generation");
-  const provider = new OpenAICompatibleProvider();
-  const promptVersion = await getActivePrompt("draft_article");
-  const claimText = claims.map((c:any)=>`[${c.id}] ${c.claim_text}`).join("\n");
-  const prompt = renderPrompt(promptVersion.user, { storyTitle: story.canonical_title ?? "Untitled story", verifiedClaims: claimText });
-  const result = await provider.generateJson<any>({ system: promptVersion.system, prompt, schemaName: "article_draft_v1" });
-  const slug = String(result.value.headline ?? story.canonical_title ?? story.id).toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,120) || story.id;
-  const { data: article, error: articleError } = await client.from("articles").upsert({ story_id: story.id, slug, status: "DRAFT", headline: result.value.headline, summary: result.value.summary, body_mdx: result.value.bodyMdx, category: result.value.category, seo_title: result.value.seoTitle, seo_description: result.value.seoDescription, last_verified_at: story.last_verified_at }, { onConflict: "story_id" }).select("*").single();
-  if (articleError) throw articleError;
-
-  await client.from("article_citations").delete().eq("article_id", article.id);
-  const usages = Array.isArray(result.value.claimUsages) ? result.value.claimUsages : (result.value.claimIdsUsed ?? []).map((claimId:string)=>({ claimId, articleLocator: "article" }));
-  const validClaimIds = new Set(claims.map((c:any)=>c.id));
-  for (const usage of usages) {
-    if (!validClaimIds.has(usage.claimId)) continue;
-    const { data: evidence } = await client.from("claim_evidence").select("document_id").eq("claim_id", usage.claimId).eq("stance", "SUPPORTS");
-    for (const row of evidence ?? []) await client.from("article_citations").upsert({ article_id: article.id, claim_id: usage.claimId, document_id: row.document_id, article_locator: String(usage.articleLocator ?? "article").slice(0,500) }, { onConflict: "article_id,claim_id,document_id,article_locator" });
-  }
-
-  const { data: aiRun } = await client.from("ai_runs").insert({ story_id: story.id, article_id: article.id, operation: "DRAFT_ARTICLE", provider: result.provider, model: result.model, prompt_version_id: promptVersion.id, output_json: { headline: result.value.headline, claimUsageCount: usages.length }, input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens, latency_ms: result.latencyMs, estimated_cost_usd: result.estimatedCostUsd, success: true }).select("id").single();
-  if (aiRun) await client.from("llm_usage").insert({ ai_run_id: aiRun.id, provider: result.provider, model: result.model, input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens, estimated_cost_usd: result.estimatedCostUsd });
-  await client.from("stories").update({ status: "DRAFTED" }).eq("id", story.id);
-  await enqueueJob("QUALITY_CHECK", makeIdempotencyKey("quality", [article.id, stableHash(article.body_mdx)]), { articleId: article.id, structuredFacts: { numbers: result.value.numbers ?? [], namedEntities: result.value.namedEntities ?? [], dates: result.value.dates ?? [], quotes: result.value.quotes ?? [] } });
-  return { articleId: article.id };
-}
-
-async function extractArticleFacts(articleBody: string, storyId?: string, articleId?: string) {
-  const provider = new OpenAICompatibleProvider();
-  const promptVersion = await getActivePrompt("extract_article_facts");
-  const prompt = renderPrompt(promptVersion.user, { articleBody });
-  const result = await provider.generateJson<any>({ system: promptVersion.system, prompt, schemaName: "article_facts_v1" });
-  const client = db();
-  const { data: aiRun } = await client.from("ai_runs").insert({ story_id: storyId ?? null, article_id: articleId ?? null, operation: "EXTRACT_ARTICLE_FACTS", provider: result.provider, model: result.model, prompt_version_id: promptVersion.id, output_json: { numbers: result.value.numbers?.length ?? 0, entities: result.value.namedEntities?.length ?? 0 }, input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens, latency_ms: result.latencyMs, estimated_cost_usd: result.estimatedCostUsd, success: true }).select("id").single();
-  if (aiRun) await client.from("llm_usage").insert({ ai_run_id: aiRun.id, provider: result.provider, model: result.model, input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens, estimated_cost_usd: result.estimatedCostUsd });
-  return { numbers: result.value.numbers ?? [], namedEntities: result.value.namedEntities ?? [], dates: result.value.dates ?? [], quotes: result.value.quotes ?? [] };
-}
-
-async function gateBody(args: { storyId: string; articleId: string; headline: string; body: string; seoComplete: boolean; facts: any }) {
-  const client = db();
-  const [{ data: verifiedClaims }, { data: allClaims }, { data: links }, { count: citationCount }] = await Promise.all([
-    client.from("claims").select("id,claim_text,status").eq("story_id", args.storyId).in("status", ["SUPPORTED","MULTI_SOURCE_SUPPORTED","PRIMARY_SOURCE_VERIFIED"]),
-    client.from("claims").select("id,status").eq("story_id", args.storyId),
-    client.from("story_sources").select("source_documents(id,canonical_url)").eq("story_id", args.storyId),
-    client.from("article_citations").select("id", { count: "exact", head: true }).eq("article_id", args.articleId),
-  ]);
-  const gate = runPublicationGate({ title: args.headline, body: args.body, numericalClaims: args.facts.numbers ?? [], namedEntities: args.facts.namedEntities ?? [], dates: args.facts.dates ?? [], quotes: args.facts.quotes ?? [], supportedClaimTexts: (verifiedClaims ?? []).map((c:any)=>c.claim_text), sourceUrls: (links ?? []).map((r:any)=>r.source_documents?.canonical_url).filter(Boolean), unresolvedContradictions: (allClaims ?? []).filter((c:any)=>c.status==='CONFLICTED').length, duplicateStory: false, seoComplete: args.seoComplete });
-  if (!citationCount) gate.blockers.push("PROVENANCE_INCOMPLETE");
-  gate.allowed = gate.blockers.length === 0;
-  return gate;
-}
-
-async function handleVerifyEditedArticle(payload: any) {
-  const client = db();
-  const { data: article, error } = await client.from("articles").select("*").eq("id", payload.articleId).single();
+  const flags = await getGlobalAutomationConfig();
+  if (flags.flags.evidence_draft_workflow !== true) throw new Error("Evidence draft workflow paused");
+  const { data: story, error } = await client.from("stories").select("*").eq("id", payload.storyId).single();
   if (error) throw error;
-  const facts = await extractArticleFacts(article.body_mdx, article.story_id, article.id);
-  return handleQualityCheck({ articleId: article.id, structuredFacts: facts });
+  if (!story.active_claim_set_id) throw new Error("No versioned claim set");
+  const { data: claims, error: claimError } = await client.from("claims").select("id,claim_text,status").eq("story_id", story.id).eq("claim_set_id", story.active_claim_set_id).in("status", ["SUPPORTED","MULTI_SOURCE_SUPPORTED","PRIMARY_SOURCE_VERIFIED"]);
+  if (claimError) throw claimError;
+  if (!claims?.length) throw new Error("No human-reviewed claims available");
+  const { data: previous, error: previousError } = await client.from("articles").select("id,revision,status").eq("story_id", story.id).maybeSingle();
+  if (previousError) throw previousError;
+  if (previous && ["PUBLISHED","CORRECTED"].includes(previous.status)) throw new Error("Published articles require correction workflow");
+  const provider = new OpenAICompatibleProvider();
+  const template = await getActivePrompt("draft_article");
+  const result = await provider.generateJson<unknown>({ system: template.system, prompt: renderPrompt(template.user, { storyTitle: story.canonical_title ?? "Untitled", verifiedClaims: JSON.stringify(claims) }), schemaName: "structured_article_v2" });
+  const content = composeStructuredDraft(result.value, claims);
+  // Worker writes carry the revision observed before the external model call.
+  let article = previous;
+  if (!article) {
+    const { data: inserted, error: insertError } = await client.from("articles").insert({ story_id: story.id, slug: `story-${story.id}`, headline: content.headline, status: "DRAFT", category: content.category }).select("id,revision,status").single();
+    if (insertError) throw insertError;
+    article = inserted;
+  }
+  const { error: saveError } = await client.rpc("save_generated_draft", { p_article_id: article!.id, p_expected_revision: article!.revision, p_claim_set_id: story.active_claim_set_id, p_content: content });
+  if (saveError) throw saveError;
+  const { data: aiRun, error: logError } = await client.from("ai_runs").insert({ story_id: story.id, article_id: article!.id, operation: "DRAFT_ARTICLE", provider: result.provider, model: result.model, prompt_version_id: template.id, output_json: { structured: true }, input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens, latency_ms: result.latencyMs, estimated_cost_usd: result.estimatedCostUsd, success: true }).select("id").single();
+  if (logError) throw logError;
+  const { error: usageError } = await client.from("llm_usage").insert({ ai_run_id: aiRun.id, provider: result.provider, model: result.model, input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens, estimated_cost_usd: result.estimatedCostUsd });
+  if (usageError) throw usageError;
+  return handleQualityCheck({ articleId: article!.id });
 }
 
+async function handleVerifyEditedArticle(payload: any) { return handleQualityCheck(payload); }
 async function handleVerifyCorrection(payload: any) {
   const client = db();
-  const { data: correction, error } = await client.from("corrections").select("*,articles(id,story_id,headline,seo_title,seo_description)").eq("id", payload.correctionId).single();
+  const { data, error } = await client.rpc("check_correction_gate", { p_correction_id: payload.correctionId });
   if (error) throw error;
-  if (!correction.proposed_body_mdx) throw new Error("Correction has no proposed article body");
-  const facts = await extractArticleFacts(correction.proposed_body_mdx, correction.articles.story_id, correction.articles.id);
-  const gate = await gateBody({ storyId: correction.articles.story_id, articleId: correction.articles.id, headline: correction.articles.headline, body: correction.proposed_body_mdx, seoComplete: Boolean(correction.articles.seo_title && correction.articles.seo_description), facts });
-  await client.from("corrections").update({ status: gate.allowed ? "READY" : "BLOCKED" }).eq("id", correction.id);
-  await client.from("audit_logs").insert({ action: "CORRECTION_QUALITY_GATE", target_type: "correction", target_id: correction.id, after_data: gate });
-  return gate;
+  return data;
 }
-
 async function handleQualityCheck(payload: any) {
   const client = db();
-  const { data: article, error } = await client.from("articles").select("*").eq("id", payload.articleId).single(); if (error) throw error;
-  const gate = await gateBody({ storyId: article.story_id, articleId: article.id, headline: article.headline, body: article.body_mdx, seoComplete: Boolean(article.seo_title && article.seo_description), facts: payload.structuredFacts ?? {} });
-  await client.from("articles").update({ status: gate.allowed ? "REVIEW" : "DRAFT" }).eq("id", article.id);
-  await client.from("audit_logs").insert({ action: "QUALITY_GATE", target_type: "article", target_id: article.id, after_data: gate });
-  if (gate.allowed) await enqueueJob("EVALUATE_AUTONOMY", makeIdempotencyKey("autonomy", [article.id, stableHash(article.body_mdx)]), { articleId: article.id });
-  return gate;
+  const { data, error } = await client.rpc("refresh_article_gate", { p_article_id: payload.articleId });
+  if (error) throw error;
+  return data;
 }
 
 async function handleEvaluateAutonomy(payload: any) {
@@ -426,14 +342,10 @@ async function handleEvaluateAutonomy(payload: any) {
   const sourceTier = sourceTypes.includes("PRIMARY") ? "PRIMARY" : sourceTypes.includes("REGULATOR") ? "REGULATOR" : "OTHER";
   const category = String(article.category ?? "uncategorized").toLowerCase();
   const highRisk = isHighRiskCategory(category);
-  const decision = evaluateAutonomy({ confidence: Number(article.stories?.confidence_score ?? 0), category, sourceTier, unresolvedContradictions: conflicted?.length ?? 0, provenanceComplete: Boolean(citations), qualityGatePassed: article.status === "REVIEW", globalPause: Boolean(config.config["automation.global_pause"]), autoPublishEnabled: Boolean(config.flags.auto_publish), shadowMode: config.config["automation.shadow_mode"] !== false, highRisk, approvedCategories: Array.isArray(config.config["autonomy.approved_categories"]) ? config.config["autonomy.approved_categories"] as string[] : ["ai","technology","startups","funding","developer-tools"], approvedSourceTiers: Array.isArray(config.config["autonomy.approved_source_tiers"]) ? config.config["autonomy.approved_source_tiers"] as string[] : ["PRIMARY","REGULATOR"], minimumConfidence: Number(config.config["confidence.minimum_auto_publish"] ?? 90), budgetAvailable: budget.state !== "EXHAUSTED" });
-  const reason = { sourceTier, highRisk, citations, conflictedClaims: conflicted?.length ?? 0, qualityGatePassed: article.status === "REVIEW", autoPublishEnabled: Boolean(config.flags.auto_publish), shadowMode: config.config["automation.shadow_mode"] !== false, budgetState: budget.state, estimatedSpendToday: budget.spend, dailyBudget: budget.dailyBudget };
+  const decision = evaluateAutonomy({ confidence: Number(article.stories?.confidence_score ?? 0), category, sourceTier, unresolvedContradictions: conflicted?.length ?? 0, provenanceComplete: Boolean(citations), qualityGatePassed: article.status === "REVIEW", globalPause: Boolean(config.config["automation.global_pause"]), autoPublishEnabled: false, shadowMode: config.config["automation.shadow_mode"] !== false, highRisk, approvedCategories: Array.isArray(config.config["autonomy.approved_categories"]) ? config.config["autonomy.approved_categories"] as string[] : ["ai","technology","startups","funding","developer-tools"], approvedSourceTiers: Array.isArray(config.config["autonomy.approved_source_tiers"]) ? config.config["autonomy.approved_source_tiers"] as string[] : ["PRIMARY","REGULATOR"], minimumConfidence: Number(config.config["confidence.minimum_auto_publish"] ?? 90), budgetAvailable: budget.state !== "EXHAUSTED" });
+  const reason = { sourceTier, highRisk, citations, conflictedClaims: conflicted?.length ?? 0, qualityGatePassed: article.status === "REVIEW", autoPublishEnabled: false, shadowMode: config.config["automation.shadow_mode"] !== false, budgetState: budget.state, estimatedSpendToday: budget.spend, dailyBudget: budget.dailyBudget };
   await client.from("autonomy_decisions").insert({ article_id: article.id, system_decision: decision, system_reason: reason, confidence: Number(article.stories?.confidence_score ?? 0) });
   await client.from("audit_logs").insert({ action: "AUTONOMY_DECISION", target_type: "article", target_id: article.id, after_data: { decision, ...reason } });
-  if (decision === "AUTO_PUBLISH") {
-    await client.from("articles").update({ status: "APPROVED" }).eq("id", article.id);
-    await enqueueJob("PUBLISH_ARTICLE", makeIdempotencyKey("publish", [article.id]), { articleId: article.id });
-  }
   return { decision };
 }
 
@@ -442,13 +354,7 @@ async function handlePublishArticle(payload: any) {
   const { data: article, error: articleError } = await client.from("articles").select("*").eq("id", payload.articleId).single();
   if (articleError) throw articleError;
   if (article.status === "SCHEDULED" && article.scheduled_for && Date.parse(article.scheduled_for) > Date.now()) throw new Error("Scheduled article is not due yet");
-  const facts = await extractArticleFacts(article.body_mdx, article.story_id, article.id);
-  const gate = await gateBody({ storyId: article.story_id, articleId: article.id, headline: article.headline, body: article.body_mdx, seoComplete: Boolean(article.seo_title && article.seo_description), facts });
-  if (!gate.allowed) {
-    await client.from("audit_logs").insert({ actor_id: payload.actorId ?? null, action: "PUBLISH_BLOCKED_BY_GATE", target_type: "article", target_id: article.id, after_data: gate });
-    throw new Error(`Publication gate blocked article: ${gate.blockers.join(", ")}`);
-  }
-  const { data, error } = await client.rpc("publish_article", { p_article_id: payload.articleId, p_actor_id: payload.actorId ?? null });
+  const { data, error } = await client.rpc("publish_article_revision", { p_article_id: payload.articleId, p_actor_id: payload.actorId ?? article.reviewer_id ?? null, p_expected_revision: payload.expectedRevision ?? null });
   if (error) throw error;
   const config = await getGlobalAutomationConfig();
   if (config.flags.aveiro_sync) await enqueueJob("SYNC_AVEIRO", makeIdempotencyKey("aveiro", [payload.articleId]), { articleId: payload.articleId });
@@ -568,10 +474,10 @@ export async function scheduleDueWork() {
     await client.from("source_watchlists").update({ last_run_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", watch.id);
     queued++;
   }
-  const { data: due, error: dueError } = await client.from("articles").select("id").eq("status", "SCHEDULED").lte("scheduled_for", new Date().toISOString()).limit(100);
+  const { data: due, error: dueError } = await client.from("articles").select("id,revision").eq("status", "SCHEDULED").lte("scheduled_for", new Date().toISOString()).limit(100);
   if (dueError) throw dueError;
   for (const article of due ?? []) {
-    await enqueueJob("PUBLISH_ARTICLE", makeIdempotencyKey("scheduled-publish", [article.id]), { articleId: article.id });
+    await enqueueJob("PUBLISH_ARTICLE", makeIdempotencyKey("scheduled-publish", [article.id,article.revision]), { articleId: article.id, expectedRevision: article.revision });
     queued++;
   }
   return { queued };

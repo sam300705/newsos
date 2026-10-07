@@ -10,9 +10,31 @@ import { validateSourceType } from "@/core/source-validation";
 
 const id = (fd:FormData,name:string) => {const v=String(fd.get(name)??'').trim(); if(!v)throw new Error(`${name} is required`); return v;};
 
-export async function approveArticle(fd:FormData){const actor=await requireStaff(['OWNER','ADMIN','EDITOR']); const articleId=id(fd,'articleId'); const db=createAdminSupabaseClient(); const {data:article,error:read}=await db.from('articles').select('status').eq('id',articleId).single(); if(read)throw read; if(article.status!=='REVIEW')throw new Error('Only REVIEW articles can be approved'); const {error}=await db.from('articles').update({status:'APPROVED',reviewer_id:actor.userId,updated_at:new Date().toISOString()}).eq('id',articleId); if(error)throw error; await db.from('autonomy_decisions').update({editor_decision:'APPROVED',decided_by:actor.userId,reviewed_at:new Date().toISOString()}).eq('article_id',articleId).is('editor_decision',null); await recordAudit(actor.userId,'APPROVE_ARTICLE','article',articleId,{status:'APPROVED'},{status:article.status}); revalidatePath('/admin');}
+export async function approveArticle(fd: FormData) {
+  const actor = await requireStaff(['OWNER','ADMIN','EDITOR']);
+  const db = createAdminSupabaseClient();
+  const { error } = await db.rpc('approve_article_revision', { p_article_id: id(fd,'articleId'), p_actor_id: actor.userId, p_expected_revision: revision(fd) });
+  if (error) throw error;
+  revalidatePath('/admin');
+}
+function revision(fd: FormData) { const value = Number(id(fd,'revision')); if (!Number.isSafeInteger(value) || value < 1) throw new Error('Revision required'); return value; }
+export async function reviewEvidence(fd: FormData) {
+  const actor = await requireStaff(['OWNER','ADMIN','EDITOR','REVIEWER']);
+  const db = createAdminSupabaseClient();
+  const { error } = await db.rpc('review_claim_evidence', { p_evidence_id: id(fd,'evidenceId'), p_actor_id: actor.userId, p_decision: id(fd,'decision'), p_reason: id(fd,'reason').slice(0,2000) });
+  if (error) throw error;
+  revalidatePath('/admin');
+  revalidatePath(`/admin/story/${id(fd,'storyId')}`);
+}
+export async function approveCorrection(fd: FormData) {
+  const actor = await requireStaff(['OWNER','ADMIN','EDITOR']);
+  const db = createAdminSupabaseClient();
+  const { error } = await db.rpc('approve_correction_revision', { p_correction_id: id(fd,'correctionId'), p_actor_id: actor.userId, p_expected_revision: revision(fd) });
+  if (error) throw error;
+  revalidatePath('/admin');
+}
 export async function rejectArticle(fd:FormData){const actor=await requireStaff(['OWNER','ADMIN','EDITOR','REVIEWER']); const articleId=id(fd,'articleId'); const reason=String(fd.get('reason')??'Rejected by editor').slice(0,1000); const db=createAdminSupabaseClient(); const {error}=await db.from('articles').update({status:'REJECTED',updated_at:new Date().toISOString()}).eq('id',articleId); if(error)throw error; await db.from('autonomy_decisions').update({editor_decision:'REJECTED',editor_reason:reason,decided_by:actor.userId,reviewed_at:new Date().toISOString()}).eq('article_id',articleId).is('editor_decision',null); await recordAudit(actor.userId,'REJECT_ARTICLE','article',articleId,{reason}); revalidatePath('/admin');}
-export async function publishArticle(fd:FormData){const actor=await requireStaff(['OWNER','ADMIN','EDITOR']); const articleId=id(fd,'articleId'); const db=createAdminSupabaseClient(); const {data:article,error}=await db.from('articles').select('status,scheduled_for').eq('id',articleId).single(); if(error)throw error; if(!['APPROVED','SCHEDULED'].includes(article.status))throw new Error('Article must be approved or due for scheduled publication'); if(article.status==='SCHEDULED'&&article.scheduled_for&&Date.parse(article.scheduled_for)>Date.now())throw new Error('Scheduled article is not due yet'); await enqueueJob('PUBLISH_ARTICLE',makeIdempotencyKey('manual-publish',[articleId,Date.now()]),{articleId,actorId:actor.userId,manual:true}); await recordAudit(actor.userId,'REQUEST_PUBLISH_ARTICLE','article',articleId,{status:article.status}); revalidatePath('/admin'); revalidatePath('/latest');}
+export async function publishArticle(fd:FormData){const actor=await requireStaff(['OWNER','ADMIN','EDITOR']); const articleId=id(fd,'articleId'); const db=createAdminSupabaseClient(); const {data:article,error}=await db.from('articles').select('status,scheduled_for,revision').eq('id',articleId).single(); if(error)throw error; if(article.revision!==revision(fd))throw new Error('Stale publication form'); if(!['APPROVED','SCHEDULED'].includes(article.status))throw new Error('Article must be approved or due for scheduled publication'); if(article.status==='SCHEDULED'&&article.scheduled_for&&Date.parse(article.scheduled_for)>Date.now())throw new Error('Scheduled article is not due yet'); await enqueueJob('PUBLISH_ARTICLE',makeIdempotencyKey('manual-publish',[articleId,Date.now()]),{articleId,actorId:actor.userId,expectedRevision:revision(fd),manual:true}); await recordAudit(actor.userId,'REQUEST_PUBLISH_ARTICLE','article',articleId,{status:article.status}); revalidatePath('/admin'); revalidatePath('/latest');}
 export async function researchMore(fd:FormData){const actor=await requireStaff(['OWNER','ADMIN','EDITOR','REVIEWER']); const storyId=id(fd,'storyId'); await enqueueJob('RESEARCH_STORY',makeIdempotencyKey('manual-research',[storyId,Date.now()]),{storyId,manual:true}); await recordAudit(actor.userId,'RESEARCH_MORE','story',storyId); revalidatePath(`/admin/story/${storyId}`);}
 export async function reextractDocument(fd:FormData){const actor=await requireStaff(['OWNER','ADMIN','EDITOR']); const discoveredUrlId=id(fd,'discoveredUrlId'); await enqueueJob('EXTRACT_DOCUMENT',makeIdempotencyKey('manual-extract',[discoveredUrlId,Date.now()]),{discoveredUrlId,manual:true}); await recordAudit(actor.userId,'REEXTRACT_DOCUMENT','discovered_url',discoveredUrlId);}
 export async function regenerateArticle(fd:FormData){const actor=await requireStaff(['OWNER','ADMIN','EDITOR']); const storyId=id(fd,'storyId'); await enqueueJob('GENERATE_ARTICLE',makeIdempotencyKey('manual-regenerate',[storyId,Date.now()]),{storyId,manual:true}); await recordAudit(actor.userId,'REGENERATE_ARTICLE','story',storyId); revalidatePath(`/admin/story/${storyId}`);}
@@ -20,7 +42,7 @@ export async function syncAveiro(fd:FormData){const actor=await requireStaff(['O
 export async function mergeStories(fd:FormData){const actor=await requireStaff(['OWNER','ADMIN','EDITOR']); const target=id(fd,'targetStoryId'); const source=id(fd,'sourceStoryId'); const db=createAdminSupabaseClient(); const {error}=await db.rpc('merge_stories',{p_target:target,p_source:source,p_actor:actor.userId}); if(error)throw error; revalidatePath(`/admin/story/${target}`);}
 export async function splitSource(fd:FormData){const actor=await requireStaff(['OWNER','ADMIN','EDITOR']); const storyId=id(fd,'storyId'); const documentId=id(fd,'documentId'); const db=createAdminSupabaseClient(); const {error}=await db.rpc('split_story_source',{p_story:storyId,p_document:documentId,p_actor:actor.userId}); if(error)throw error; revalidatePath(`/admin/story/${storyId}`);}
 export async function toggleGlobalPause(fd:FormData){const actor=await requireStaff(['OWNER','ADMIN']); const paused=String(fd.get('paused'))==='true'; await setGlobalPause(paused,actor.userId); revalidatePath('/admin/automation'); revalidatePath('/admin');}
-export async function updateSource(fd:FormData){const actor=await requireStaff(['OWNER','ADMIN','EDITOR']); const sourceId=id(fd,'sourceId'); const sourceType=validateSourceType(id(fd,'sourceType')); const rawAuthority=Number(fd.get('authorityScore')??.5); if(!Number.isFinite(rawAuthority)||rawAuthority<0||rawAuthority>1)throw new Error('Authority must be between 0 and 1'); const authority=rawAuthority; const primary=String(fd.get('primarySourceCapability'))==='on'; const db=createAdminSupabaseClient(); const {data:before,error:readError}=await db.from('sources').select('source_type,authority_score,primary_source_capability').eq('id',sourceId).single(); if(readError)throw readError; const {error}=await db.from('sources').update({source_type:sourceType,authority_score:authority,primary_source_capability:primary,updated_at:new Date().toISOString()}).eq('id',sourceId); if(error)throw error; await recordAudit(actor.userId,'UPDATE_SOURCE','source',sourceId,{sourceType,authority,primary},before); revalidatePath('/admin/sources');}
+export async function updateSource(fd:FormData){const actor=await requireStaff(['OWNER','ADMIN','EDITOR']); const sourceId=id(fd,'sourceId'); const sourceType=validateSourceType(id(fd,'sourceType')); const rawAuthority=Number(fd.get('authorityScore')??.5); if(!Number.isFinite(rawAuthority)||rawAuthority<0||rawAuthority>1)throw new Error('Authority must be between 0 and 1'); const authority=rawAuthority; const primary=String(fd.get('primarySourceCapability'))==='on'; const independenceGroup=String(fd.get('independenceGroup')??'').trim()||null; if(independenceGroup&&!/^[a-z0-9][a-z0-9._-]{0,99}$/.test(independenceGroup))throw new Error('Use a verified ownership/syndication group slug'); const db=createAdminSupabaseClient(); const {data:before,error:readError}=await db.from('sources').select('source_type,authority_score,primary_source_capability,independence_group').eq('id',sourceId).single(); if(readError)throw readError; const {error}=await db.from('sources').update({source_type:sourceType,authority_score:authority,primary_source_capability:primary,independence_group:independenceGroup,updated_at:new Date().toISOString()}).eq('id',sourceId); if(error)throw error; await recordAudit(actor.userId,'UPDATE_SOURCE','source',sourceId,{sourceType,authority,primary,independenceGroup},before); revalidatePath('/admin/sources');}
 
 export async function editArticle(fd:FormData){
   const actor=await requireStaff(['OWNER','ADMIN','EDITOR']);
@@ -28,13 +50,10 @@ export async function editArticle(fd:FormData){
   const headline=id(fd,'headline').slice(0,300);
   const summary=String(fd.get('summary')??'').slice(0,1000);
   const bodyMdx=id(fd,'bodyMdx').slice(0,100000);
-  const seoTitle=String(fd.get('seoTitle')??headline).slice(0,300);
-  const seoDescription=String(fd.get('seoDescription')??summary).slice(0,500);
   const db=createAdminSupabaseClient();
   const {data:article,error:read}=await db.from('articles').select('id,story_id,status').eq('id',articleId).single();
-  if(read)throw read;
-  if(['PUBLISHED','CORRECTED'].includes(article.status))throw new Error('Published articles must use the correction workflow');
-  const {error}=await db.from('articles').update({headline,summary,body_mdx:bodyMdx,seo_title:seoTitle,seo_description:seoDescription,status:'DRAFT',updated_at:new Date().toISOString()}).eq('id',articleId);
+  if (read) throw read;
+  const {error}=await db.rpc('edit_article_revision',{p_article_id:articleId,p_actor_id:actor.userId,p_expected_revision:revision(fd),p_content:{headline,summary,body:bodyMdx}});
   if(error)throw error;
   await enqueueJob('VERIFY_EDITED_ARTICLE',makeIdempotencyKey('verify-edit',[articleId,Date.now()]),{articleId});
   await recordAudit(actor.userId,'EDIT_ARTICLE','article',articleId,{headline,status:'DRAFT'});
@@ -50,7 +69,7 @@ export async function scheduleArticle(fd:FormData){
   const db=createAdminSupabaseClient();
   const {data:article,error:read}=await db.from('articles').select('status,story_id').eq('id',articleId).single(); if(read)throw read;
   if(article.status!=='APPROVED')throw new Error('Only approved articles can be scheduled');
-  const {error}=await db.from('articles').update({status:'SCHEDULED',scheduled_for:when.toISOString(),updated_at:new Date().toISOString()}).eq('id',articleId); if(error)throw error;
+  const {error}=await db.from('articles').update({status:'SCHEDULED',scheduled_for:when.toISOString(),updated_at:new Date().toISOString()}).eq('id',articleId).eq('revision',revision(fd)).select('id').single(); if(error)throw error;
   await recordAudit(actor.userId,'SCHEDULE_ARTICLE','article',articleId,{scheduledFor:when.toISOString()});
   revalidatePath(`/admin/story/${article.story_id}`);
 }
@@ -65,7 +84,8 @@ export async function proposeCorrection(fd:FormData){
   const db=createAdminSupabaseClient();
   const {data:article,error:read}=await db.from('articles').select('status,story_id').eq('id',articleId).single(); if(read)throw read;
   if(!['PUBLISHED','CORRECTED'].includes(article.status))throw new Error('Corrections can only target published articles');
-  const {data:correction,error}=await db.from('corrections').insert({article_id:articleId,reason,previous_value:previousValue||null,corrected_value:correctedValue||null,created_by:actor.userId,status:'VERIFYING',proposed_body_mdx:proposedBody}).select('id').single(); if(error)throw error;
+  const {data:correctionId,error}=await db.rpc('propose_correction_revision',{p_article_id:articleId,p_actor_id:actor.userId,p_expected_revision:revision(fd),p_content:{reason,previousValue,correctedValue,body:proposedBody}}); if(error)throw error;
+  const correction={id:correctionId};
   await enqueueJob('VERIFY_CORRECTION',makeIdempotencyKey('verify-correction',[correction.id]),{correctionId:correction.id});
   await recordAudit(actor.userId,'PROPOSE_CORRECTION','article',articleId,{correctionId:correction.id,reason});
   revalidatePath(`/admin/story/${article.story_id}`);
