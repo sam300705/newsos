@@ -2,7 +2,9 @@
 
 ## Code gate
 
-- [ ] `package-lock.json` committed.
+- [x] `package-lock.json` committed on the application candidate.
+- [ ] Read-only CI verifies the recorded event SHA using Node 22.16.0 / npm 10.9.2.
+- [ ] PR and lockfile-only triggers accepted on GitHub.
 - [ ] `npm ci` exit 0.
 - [ ] `npm run verify:offline` exit 0.
 - [ ] `npm run typecheck` exit 0.
@@ -11,6 +13,8 @@
 - [ ] `npm run build` exit 0.
 - [ ] Secret scan clean.
 - [ ] Git diff check clean.
+
+Local Phase 1 command evidence is in `../testing/final-verification.md`; it does not close live release gates.
 
 ## Supabase
 
@@ -26,7 +30,7 @@
 
 - [ ] Tavily Search/Extract/Crawl/Research test calls recorded.
 - [ ] LLM structured-output calls verified.
-- [ ] Current provider pricing configured or dollar budget explicitly considered incomplete.
+- [ ] Current provider pricing and atomic paid-call budget admission verified; unknown pricing blocks unattended paid work.
 - [ ] Aveiro draft create/update/retry idempotency verified without auto-publish permission.
 
 ## Publisher/product

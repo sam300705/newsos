@@ -68,8 +68,8 @@ See `docs/architecture/pipeline.md` and `ARCHITECTURE.md` for details.
 ## Local development
 
 1. Copy `.env.example` to `.env.local` and configure a **dedicated NewsOS Supabase project**. Never point NewsOS migrations at CourseOS.
-2. When npm registry access is available, run `npm install` once and commit the generated `package-lock.json`.
-3. Thereafter use `npm ci`.
+2. Use Node 22.16.0 and npm 10.9.2 for the release gate. The dependency lockfile is committed.
+3. Install from it with `npm ci`; do not regenerate it during verification.
 4. Apply Supabase migrations to the dedicated project.
 5. Run the verification sequence below.
 6. Start with `npm run dev`.
@@ -117,7 +117,7 @@ Tavily Search is used for discovery/corroboration, Extract for accessible source
 
 ## AI model abstraction
 
-`OpenAICompatibleProvider` isolates the application from one model vendor. Critical prompts are versioned in PostgreSQL. Source-derived text is explicitly treated as untrusted data. Model outputs are validated by deterministic evidence/publication checks before consequential writes or publication.
+`OpenAICompatibleProvider` isolates the application from one model vendor. Critical prompts are versioned in PostgreSQL. Source-derived text is explicitly treated as untrusted data. The current adapter parses JSON and uses downstream evidence/publication checks; runtime output schemas and complete evidence validation remain later-phase work.
 
 ## Aveiro
 
@@ -146,7 +146,7 @@ No production-ready claim should be made unless the relevant command has fresh e
 
 ## CI
 
-GitHub Actions uses deterministic `npm ci`, then offline trust contracts, typecheck, lint, tests, and build. CI becomes executable after `package-lock.json` is generated and committed from a registry-connected environment.
+GitHub Actions verifies the event checkout using the committed lockfile, then offline contracts, typecheck, lint, Vitest and build. PRs verify GitHub's merge candidate; the summary records its SHA and the PR head SHA. Push/manual runs verify the selected event commit. CI has read-only repository permissions, never commits/rebases/pushes, and includes lockfile-only changes. See `docs/testing/phase-1-reproducibility.md` for branch integration and evidence.
 
 ## Deployment
 
@@ -158,4 +158,6 @@ See `SECURITY.md`, `EDITORIAL_POLICY.md`, `SOURCE_POLICY.md`, and `docs/security
 
 ## Current status
 
-The Phase 0–16 implementation exists. The latest dependency-free trust/security suite is **48/48 passing** and the dedicated live Supabase project has all migrations applied with **0 security-advisor findings**. Full dependency-backed TypeScript/lint/Vitest/Next.js build verification, live Auth role smoke, Tavily/LLM acceptance, Aveiro synchronization and Vercel preview acceptance are still release gates. See `MANUAL_HANDOFF.md` and `docs/testing/master-spec-audit.md` for exact evidence and remaining requirements.
+The substantial application is on `feat/phases-1-16`; `main` contains bootstrap material. Phase 1 establishes reproducible, read-only CI without merging branches. Fresh local verification passed 53 offline tests, 8 Vitest tests, typecheck, lint and build; see `docs/testing/final-verification.md` for exact candidate/runtime evidence and limits.
+
+Historical live Supabase claims (45 tables with RLS, zero security-advisor findings) have not been reverified with the current connected account. The observed Netlify URL returned 404 and its smoke run failed. Live Auth/RLS, provider acceptance, browser E2E, evidence correctness, worker recovery, cost containment and deployment acceptance remain release gates. Auto-publish should remain off.
