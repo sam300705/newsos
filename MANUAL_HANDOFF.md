@@ -4,7 +4,7 @@
 
 The GitHub repository exists and the application branch has a committed npm lockfile. Do not create a replacement repository or regenerate a lockfile merely to verify the code. See `docs/testing/final-verification.md` and `docs/testing/phase-1-reproducibility.md`.
 
-Phase 1 changes CI/documentation only. No migration, external provider call, deployment or merge is part of it.
+Phase 1 changes CI/documentation only. Phase 2 adds a source-metadata projection migration and disposable database verification; it does not apply migrations to any live project. See `docs/testing/phase-2-database.md`. No provider call, deployment or merge is part of either phase.
 
 ## Supabase access and acceptance
 

@@ -161,3 +161,7 @@ See `SECURITY.md`, `EDITORIAL_POLICY.md`, `SOURCE_POLICY.md`, and `docs/security
 The substantial application is on `feat/phases-1-16`; `main` contains bootstrap material. Phase 1 establishes reproducible, read-only CI without merging branches. Fresh local verification passed 53 offline tests, 8 Vitest tests, typecheck, lint and build; see `docs/testing/final-verification.md` for exact candidate/runtime evidence and limits.
 
 Historical live Supabase claims (45 tables with RLS, zero security-advisor findings) have not been reverified with the current connected account. The observed Netlify URL returned 404 and its smoke run failed. Live Auth/RLS, provider acceptance, browser E2E, evidence correctness, worker recovery, cost containment and deployment acceptance remain release gates. Auto-publish should remain off.
+
+## Database verification (Phase 2)
+
+Run `npm run test:db` for fresh disposable migration/RLS/grant tests and `npm run db:types:check` for catalog type drift. Full Supabase replay runs separately in CI using Docker and shared SQL assertions. Public citations use a bounded published-only metadata RPC; raw documents stay staff-only. See `docs/testing/phase-2-database.md` for evidence limits and setup.

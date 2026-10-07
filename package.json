@@ -14,22 +14,27 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
-    "verify:offline": "node --experimental-strip-types --test tests/offline/*.test.ts"
+    "verify:offline": "node --experimental-strip-types --test tests/offline/*.test.ts",
+    "test:db": "node scripts/db/test.mjs",
+    "db:types": "node scripts/db/generate-types.mjs",
+    "db:types:check": "node scripts/db/generate-types.mjs --check"
   },
   "dependencies": {
+    "@supabase/ssr": "0.10.0",
     "@supabase/supabase-js": "2.116.0",
+    "fast-xml-parser": "5.2.5",
+    "nanoid": "5.1.5",
     "next": "16.3.5",
+    "p-limit": "6.2.0",
     "pino": "10.3.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "zod": "4.6.5",
     "server-only": "0.0.1",
-    "@supabase/ssr": "0.10.0",
-    "fast-xml-parser": "5.2.5",
-    "nanoid": "5.1.5",
-    "p-limit": "6.2.0"
+    "zod": "4.6.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "@electric-sql/pglite-pgvector": "0.0.9",
     "@types/node": "22.20.3",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",

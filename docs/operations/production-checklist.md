@@ -22,8 +22,10 @@ Local Phase 1 command evidence is in `../testing/final-verification.md`; it does
 - [ ] Migrations applied in order.
 - [ ] Security advisor reviewed/fixed.
 - [ ] Performance advisor reviewed/fixed.
-- [ ] Generated DB types current.
-- [ ] Live role/RLS matrix tested.
+- [ ] Generated replay catalog types match migrations (`npm run db:types:check`).
+- [ ] Official live schema types compared after project access is restored.
+- [ ] Disposable DB role/RLS tests pass (`npm run test:db` and full Supabase CI).
+- [ ] Live Auth/session and role/RLS matrix tested.
 - [ ] OWNER bootstrap verified.
 
 ## Providers
