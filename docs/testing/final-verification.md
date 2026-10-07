@@ -36,3 +36,7 @@ All commands exited 0 on implementation commit b4a5cac34e562546e40f404edb5c20fd4
 YAML parsed successfully; event triggers/read-only permissions/default checkout and every embedded shell step were checked. Package metadata/lockfile were unchanged. Build-generated next-env.d.ts and tsconfig.json diffs were inspected and restored locally. No application configuration changes were retained.
 
 GitHub execution of the new workflow and PR-trigger acceptance remain NOT RUN until a run completes. Lockfile-only triggers are present by configuration but no synthetic lockfile change was introduced merely to test them.
+
+## Phase 2 evidence
+
+See `phase-2-database.md` for the exact local implementation SHA, 15-migration replay, 85 DB assertions, 53 offline tests, 11 Vitest tests and remaining external limits. Phase 1 PR/push checks completed successfully in runs 37633565392 and 37633560115 at head 1d9f4a7f9369f1eb048a04ae0ef2efe78c7383fe. These are separate from Phase 2 acceptance.

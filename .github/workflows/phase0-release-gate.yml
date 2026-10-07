@@ -67,6 +67,12 @@ jobs:
       - name: Offline trust and security contracts
         run: npm run verify:offline
 
+      - name: Embedded migration and permissions tests
+        run: npm run test:db
+
+      - name: Database type drift
+        run: npm run db:types:check
+
       - name: Typecheck
         run: npm run typecheck
 
