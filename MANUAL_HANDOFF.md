@@ -32,3 +32,7 @@ Identify the actual host/project and deployed SHA before changing infrastructure
 - Preview runtime health, alerts, backups and restore drill.
 
 Main integration, deployment and public publishing require separate task authorization. Auto-publish remains off; shadow mode remains the initial policy.
+
+## Phase 3 evidence and publication safety
+
+See [the Phase 3 implementation and verification notes](docs/testing/phase-3-evidence-publication.md). New publication requires versioned exact passages, human support review, an independent approver, complete statement coverage and atomic snapshot/history/outbox writes. Native concurrency CI and live acceptance are recorded separately. Auto-publication remains disabled.

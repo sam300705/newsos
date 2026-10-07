@@ -40,3 +40,7 @@ GitHub execution of the new workflow and PR-trigger acceptance remain NOT RUN un
 ## Phase 2 evidence
 
 See `phase-2-database.md` for the exact local implementation SHA, 15-migration replay, 85 DB assertions, 53 offline tests, 11 Vitest tests and remaining external limits. Phase 1 PR/push checks completed successfully in runs 37633565392 and 37633560115 at head 1d9f4a7f9369f1eb048a04ae0ef2efe78c7383fe. These are separate from Phase 2 acceptance.
+
+## Phase 3 candidate
+
+The versioned passage/human-review/atomic-publication candidate is documented in [Phase 3 verification](../testing/phase-3-evidence-publication.md). Local replay includes 16 migrations and 131 SQL assertions. Full native Supabase concurrency acceptance is the PR database CI result; live project/Auth/provider acceptance remains blocked. No auto-publication, deployment or merge is authorized by a passing disposable database check.

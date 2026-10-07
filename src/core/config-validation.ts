@@ -1,5 +1,6 @@
 const FEATURE_FLAGS = new Set([
   "auto_publish",
+  "evidence_draft_workflow",
   "multilingual_generation",
   "ask_the_news",
   "social_generation",

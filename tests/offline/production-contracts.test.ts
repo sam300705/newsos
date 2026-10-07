@@ -63,7 +63,7 @@ test("scheduled publication is re-gated when due", () => {
   const pipeline = read("src/lib/jobs/pipeline.ts");
   assert.match(pipeline, /\.eq\("status", "SCHEDULED"\)\.lte\("scheduled_for"/);
   assert.match(pipeline, /PUBLISH_ARTICLE/);
-  assert.match(pipeline, /gateBody\(/);
+  assert.match(pipeline, /rpc\("publish_article_revision"/);
   assert.match(pipeline, /Scheduled article is not due yet/);
 });
 

@@ -4,6 +4,7 @@ function normalized(value: string): string {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+/** @deprecated Advisory surface-form checks only. Publication authorization is the SQL coverage/approval transaction. */
 export function runPublicationGate(candidate: PublicationCandidate): PublicationGateResult {
   const blockers: string[] = [];
   const evidence = normalized(candidate.supportedClaimTexts.join(" \n "));

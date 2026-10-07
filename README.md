@@ -165,3 +165,7 @@ Historical live Supabase claims (45 tables with RLS, zero security-advisor findi
 ## Database verification (Phase 2)
 
 Run `npm run test:db` for fresh disposable migration/RLS/grant tests and `npm run db:types:check` for catalog type drift. Full Supabase replay runs separately in CI using Docker and shared SQL assertions. Public citations use a bounded published-only metadata RPC; raw documents stay staff-only. See `docs/testing/phase-2-database.md` for evidence limits and setup.
+
+## Phase 3 evidence and publication safety
+
+See [the Phase 3 implementation and verification notes](docs/testing/phase-3-evidence-publication.md). New publication requires versioned exact passages, human support review, an independent approver, complete statement coverage and atomic snapshot/history/outbox writes. Native concurrency CI and live acceptance are recorded separately. Auto-publication remains disabled.
