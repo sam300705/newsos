@@ -1,89 +1,34 @@
-# Manual / Account-Dependent Handoff
+# NewsOS infrastructure handoff
 
-Most infrastructure work that could be performed automatically has now been completed. Only items that require secrets, user-account interaction, external-provider authorization, an internet-connected npm environment, or production authorization remain here.
+## Verified repository baseline
 
-## Completed automatically
+The GitHub repository exists and the application branch has a committed npm lockfile. Do not create a replacement repository or regenerate a lockfile merely to verify the code. See `docs/testing/final-verification.md` and `docs/testing/phase-1-reproducibility.md`.
 
-- Dedicated Supabase `NewsOS` project created in organization `sam`, region `ap-south-1`.
-- Project cost confirmed at `$0/month` before creation.
-- Database migrations applied and repaired where live PostgreSQL exposed migration bugs.
-- Supabase security advisor reduced to **0 findings**.
-- Performance advisor actionable warnings fixed; only expected unused-index INFO remains on the empty project.
-- Live RLS/privilege structure checked: 45/45 public tables have RLS, no public table is policy-less, `profiles.role` is not user-updatable, privileged RPCs are service-only.
-- Live database TypeScript generation executed.
+Phase 1 changes CI/documentation only. No migration, external provider call, deployment or merge is part of it.
 
-## 1. Dependency lockfile and full build gate
+## Supabase access and acceptance
 
-The current sandbox cannot reach the npm registry reliably.
+Historical documentation identifies dedicated NewsOS project `ycsmobruueoafsftyvps` and reports 45/45 RLS tables and zero security-advisor findings. These remain historical evidence. The 7 October connected inventory exposed only an unrelated project; the documented NewsOS project was unavailable. This does not establish that it was deleted. Restore the correct organization/account access before live verification. Do not use CourseOS or the unrelated project.
 
-In an internet-connected checkout:
+Then verify migration history, generated types, actual grants/RLS and USER/REVIEWER/EDITOR/ADMIN/OWNER behavior. Configure Auth redirect URLs and bootstrap the intended OWNER through a controlled operation. Store server credentials securely, never in chat or git.
 
-```bash
-npm install
-npm ci
-npm run verify:offline
-npm run typecheck
-npm run lint
-npm run test:run
-npm run build
-```
+## Provider setup
 
-Review resolved versions, commit `package-lock.json`, and fix any genuine type/lint/build issue before merge.
+Configure Tavily, production LLM API credentials/model/base URL, optional embedding model, Aveiro credentials/site and CRON_SECRET in secure environment settings. Consumer AI subscriptions do not prove API access. Configure current pricing before unattended paid work. Live acceptance still needs Tavily extraction, claim/draft quality, usage/cost accounting and Aveiro create/retry/update identity checks.
 
-## 2. Supabase secret + Auth owner bootstrap
+## Hosting and publisher setup
 
-The project URL and publishable key are available from the Supabase project, but the server secret must be added through a secure environment store; never paste it into chat or commit it.
+The repository has Netlify and Vercel configuration. Observed `https://newsos.netlify.app/` and `/api/health` returned 404; smoke run 35497482981 failed on public routes. The connected Vercel NewsOS search returned no project in the searched scope. Neither observation establishes the underlying cause or the state of other accounts.
 
-Then:
+Identify the actual host/project and deployed SHA before changing infrastructure. Select a host and scheduler that support measured worker duration and polling requirements; configure separate preview/production data and secrets. Set publisher/operator name, contact and site URL before public launch.
 
-1. Configure Auth redirect URLs for the Vercel preview/production domains.
-2. Sign up/sign in with the intended OWNER account through the application.
-3. Promote that account to `OWNER` through a controlled one-time database/admin operation.
-4. Live-test USER / REVIEWER / EDITOR / ADMIN / OWNER behavior.
+## Outstanding release acceptance
 
-Do **not** use CourseOS.
+- Actual Auth/RLS/role tests and disposable migration replay.
+- Evidence passage validation, complete publication coverage and approval version binding.
+- Job interruption/concurrency/retry and budget-race drills.
+- Provider contracts and budgeted live acceptance.
+- Browser E2E and full story → review → publication → RSS/sitemap → distribution acceptance.
+- Preview runtime health, alerts, backups and restore drill.
 
-## 3. Tavily / LLM / Aveiro secrets and provider pricing
-
-Add these only to secure deployment environment variables:
-
-- `TAVILY_API_KEY`
-- `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_EMBEDDING_MODEL`
-- `AVEIRO_API_TOKEN`, `AVEIRO_SITE_ID`
-- `CRON_SECRET`
-- current provider pricing variables from `.env.example`
-
-## 4. Publisher transparency
-
-Before public launch configure real values for:
-
-- `NEXT_PUBLIC_PUBLISHER_NAME`
-- `NEXT_PUBLIC_CONTACT_EMAIL`
-- production `NEXT_PUBLIC_SITE_URL`
-- final brand name if different from NewsOS
-
-## 5. Aveiro live test
-
-With the server-side token configured, sync one verified article to an Aveiro page draft, retry it to prove idempotency, update the same draft, then create newsletter/social drafts. Confirm canonical Supabase data remains intact on a simulated Aveiro failure.
-
-## 6. Vercel preview
-
-After the dependency-backed build is green, connect the repository/project, add secure environment variables, deploy a preview, and smoke-test public/admin routes, role redirects, cron authentication and runtime logs.
-
-## 7. Real story acceptance
-
-Run one real current technology/business story end-to-end through discovery → extraction → clustering → verification → draft → editorial approval → publish → RSS/sitemap → Aveiro draft → company timeline. Record source/document/story/claim/article/publication/external IDs.
-
-## 8. Production authorization
-
-Final PR merge, production DNS/domain changes, public publishing, and enabling controlled auto-publish remain explicit owner-authorized actions.
-
-## 9. GitHub repository remote
-
-The local release branch is clean and logically committed, but the connected GitHub account currently has **no NewsOS repository** and the available GitHub connector does not expose repository creation.
-
-Create one empty **private** repository under `sam300705` named `newsos` (do not initialize it with a README, license, or `.gitignore`). After that, link the local repository to that GitHub remote, push `feat/phases-1-16`, and open a PR into `main`. Do not merge the PR until the dependency-backed and preview gates pass.
-
-## 10. Vercel project state
-
-The connected Vercel team is `sam300705's projects`. A read-only project audit found **no NewsOS Vercel project** yet. Create/link/deploy NewsOS only after the GitHub remote exists, the dependency-backed build is green, and server-side secrets are stored securely in Vercel. Do not reuse one of the existing CourseOS or other project slots.
+Main integration, deployment and public publishing require separate task authorization. Auto-publish remains off; shadow mode remains the initial policy.

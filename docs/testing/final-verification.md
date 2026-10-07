@@ -1,68 +1,38 @@
-# Final Verification Evidence
+# Verification evidence
 
-## Dependency-free evidence
+## Phase 1 release candidate
 
-Run:
+Date: 7 October 2026. Base application: `134d27915a800761394e5523b9b46367fb3fd099`. Branch: `phase1/reproducible-ci`. Verified implementation commit: `b4a5cac34e562546e40f404edb5c20fd4f2db66f`. The following evidence-only commit does not alter application or workflow behavior; GitHub will verify its own exact event SHA.
 
-```bash
-npm run verify:offline
-```
+The checked-in lockfile exists. Node 22.16.0 / npm 10.9.2 are the pinned verification runtime. The release workflow uses read-only permissions, event checkout, frozen installation and no lockfile generation or remote write step. See `phase-1-reproducibility.md`.
 
-Latest repository-wide dependency-free result after live Supabase hardening and personalization/company-intelligence completion: **48 tests, 48 passed, 0 failed**.
+## Earlier audit evidence at application base
 
-The suite covers URL/SSRF/redirect safety, dedupe, clustering signals, newsworthiness, source reputation, claim confidence/contradictions, unsupported-fact publication gates, high-risk autonomy, Ask-the-News prompt/citation constraints, bounded retries and atomic job claiming, RLS/static security contracts, settings validation, feed intervals, analytics bounds, newsletter honeypot, read completion, automation flags, search sanitization, budget policy, personalization ownership and feed focus, article edit re-verification, correction readiness/history, scheduled publication gating, Aveiro idempotency, explicit cost estimation, shadow-autonomy disagreement metrics, profile-role escalation prevention, source validation, public rendering safety, cron authentication, and ordinary-role privilege hardening.
+The 7 October architecture audit passed 53/53 offline tests, 8/8 Vitest tests, typecheck, lint and Next build using fixture Supabase configuration. Its installation used --ignore-scripts and Node 24.19.0 / npm 11.9.0; Phase 1 must rerun with the pinned CI runtime and normal npm ci. GitHub release run 35497581414 at the application base succeeded, but used the old mutable release workflow.
 
-A TypeScript parser pass over **104 TS/TSX files** produced **0 syntax diagnostics**. Full project typechecking is still dependency-blocked (see below).
+## Historical external assertions
 
-## Live Supabase evidence
+Previous documentation reported migrations through 20260918001400, 45/45 RLS tables, service-only operational RPCs, role-escalation restrictions and zero Supabase security-advisor findings in project ycsmobruueoafsftyvps. These are historical assertions, not fresh verification. Current connected project inventory does not expose that NewsOS project. Live DB migration replay, Auth roles and RLS acceptance are NOT RUN in this phase.
 
-Dedicated project: `NewsOS` (`ycsmobruueoafsftyvps`), `ap-south-1`.
+Netlify smoke run 35497482981 failed at Public routes; all following acceptance steps were skipped. Direct audit requests to https://newsos.netlify.app/ and /api/health returned 404. A connected Vercel NewsOS search returned no matching project in the searched scope. Cause/deployed SHA are not established.
 
-Verified live:
+## Remaining release gates
 
-- all migrations through `20260918001400_role_privilege_hardening.sql` applied;
-- 45/45 public tables have RLS enabled;
-- 0 public tables are missing an RLS policy;
-- privileged operational RPCs are not executable by `anon` or `authenticated` and are executable by `service_role`;
-- `authenticated` cannot update `profiles.role`;
-- `anon` cannot update profiles;
-- normal authenticated users cannot directly update canonical articles;
-- authenticated users retain intended own-preference writes;
-- internal trigger helpers are no longer API-executable;
-- pgvector lives in `extensions`, not the exposed `public` schema;
-- Supabase security advisor: **0 findings**;
-- performance advisor: no actionable warnings; only unused-index INFO notices on the fresh empty database.
+Provider calls, actual story/evidence correctness, live Aveiro idempotency, browser E2E, job concurrency/failure drills, cost reservation races, preview acceptance, production deployment and restore drills remain NOT RUN or later-phase work. Placeholder credentials used for builds never establish live acceptance. Controlled auto-publish remains off initially.
 
-Live schema TypeScript generation was executed successfully against the project. Persisting/regenerating the generated file is part of the dependency-connected release workflow so it can be kept in sync by CI.
+## Fresh Phase 1 command results
 
-## Dependency-backed gate
+All commands exited 0 on implementation commit b4a5cac34e562546e40f404edb5c20fd4f2db66f with Node 22.16.0 / npm 10.9.2 and the workflow fixture variables:
 
-Not proven until all commands run in the same release candidate:
+| Command | Result |
+|---|---|
+| npm ci --no-audit --no-fund | PASS; 413 packages, lifecycle scripts enabled |
+| npm run verify:offline | PASS; 53/53 |
+| npm run typecheck | PASS |
+| npm run lint | PASS |
+| npm run test:run | PASS; 8/8 in 2 files |
+| npm run build | PASS; Next.js 16.3.5 |
 
-```bash
-npm ci
-npm run verify:offline
-npm run typecheck
-npm run lint
-npm run test:run
-npm run build
-```
+YAML parsed successfully; event triggers/read-only permissions/default checkout and every embedded shell step were checked. Package metadata/lockfile were unchanged. Build-generated next-env.d.ts and tsconfig.json diffs were inspected and restored locally. No application configuration changes were retained.
 
-Current sandbox cannot reliably reach the npm registry, so `node_modules` and `package-lock.json` are unavailable. A global TypeScript fallback cannot substitute for framework/package typings; its missing-module/JSX errors are expected in this environment.
-
-## Remaining live gate
-
-Production verification additionally requires:
-
-- real Auth signup/login plus live USER/REVIEWER/EDITOR/ADMIN/OWNER behavior;
-- live Tavily story acceptance in the release runtime;
-- configured LLM provider and one verified claim→draft flow;
-- Aveiro draft sync/update/retry test;
-- Vercel preview build and route smoke test;
-- full real-story and deliberate-failure acceptance tests.
-
-## Repository hosting / preview state
-
-- Local branch `feat/phases-1-16` is clean and split into logical commits.
-- Connected GitHub installation currently contains no `NewsOS`/`newsos` repository; the available connector cannot create a repository, so remote creation is a genuine manual infrastructure step.
-- Connected Vercel team `sam300705's projects` contains no NewsOS project yet. Preview deployment remains intentionally blocked behind the dependency-backed build plus secure deployment secrets.
+GitHub execution of the new workflow and PR-trigger acceptance remain NOT RUN until a run completes. Lockfile-only triggers are present by configuration but no synthetic lockfile change was introduced merely to test them.
