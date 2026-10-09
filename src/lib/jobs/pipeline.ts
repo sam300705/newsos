@@ -11,6 +11,7 @@ import { scoreNewsworthiness, DEFAULT_NEWSWORTHINESS_WEIGHTS } from "@/core/news
 import { evaluateAutonomy, isHighRiskCategory } from "@/core/autonomy";
 import { AveiroPublishingAdapter } from "@/lib/publishing/aveiro";
 import { retryDelayMs, shouldDeadLetter, makeIdempotencyKey } from "@/core/jobs";
+import { processClaimedJobs } from "@/core/claimed-job-loop";
 import { isJobAllowedByFlags } from "@/core/automation-flags";
 import { classifyBudget, shouldDeferForBudget } from "@/core/budget";
 import { estimateTavilyCost } from "@/core/costs";
@@ -491,10 +492,18 @@ export async function runJobBatch(limit = 10) {
   const budget = await loadDailyBudgetSnapshot(client, dailyBudget);
 
   const { data: automationRun } = await client.from("automation_runs").insert({ automation: "newsos_worker", status: "RUNNING", metadata: { spend: budget.spend, dailyBudget: budget.dailyBudget, budgetState: budget.state, budgetExceeded: budget.budgetExceeded, conserving: budget.conserving, globalPaused } }).select("id").single();
-  const { data: jobs, error } = await client.rpc("claim_job_batch", { batch_size: limit });
-  if (error) throw error;
-  let processed = 0;
-  for (const job of jobs ?? []) {
+  // Claim one job only when ready to execute it: never pre-lease work that this invocation cannot start.
+  // The deadline is checked between handlers; it does not cancel a handler already in progress.
+  const processed = await processClaimedJobs({
+    maxJobs: limit,
+    maxDurationMs: 45_000,
+    now: () => Date.now(),
+    claim: async () => {
+      const { data, error } = await client.rpc("claim_job_batch", { batch_size: 1 });
+      if (error) throw error;
+      return data?.[0] ?? null;
+    },
+    execute: async (job) => {
     const handler = JOB_HANDLERS[job.job_type];
     const jobStarted = Date.now();
     try {
@@ -503,14 +512,12 @@ export async function runJobBatch(limit = 10) {
       if (!manual && shouldDeferForBudget(job.job_type, budget.state)) {
         const reason = budget.state === "EXHAUSTED" ? "Daily cost budget reached; paid job deferred" : "Daily cost budget at conservation threshold; optional job deferred";
         await client.from("job_runs").update({ status: "QUEUED", error_message: reason, next_attempt_at: new Date(Date.now()+60*60_000).toISOString(), updated_at: new Date().toISOString() }).eq("id", job.id);
-        processed++;
-        continue;
+        return;
       }
       if (!isJobAllowedByFlags(job.job_type, config.flags, globalPaused, manual)) {
         const reason = globalPaused ? "Global automation pause active; automated job deferred" : "Feature flag disabled; automated job deferred";
         await client.from("job_runs").update({ status: "QUEUED", error_message: reason, next_attempt_at: new Date(Date.now()+60*60_000).toISOString(), updated_at: new Date().toISOString() }).eq("id", job.id);
-        processed++;
-        continue;
+        return;
       }
       if (!handler) throw new Error(`No job handler for ${job.job_type}`);
       const result = await handler(job.payload);
@@ -524,8 +531,8 @@ export async function runJobBatch(limit = 10) {
       if (dead) await client.from("dead_letters").upsert({ job_run_id: job.id, reason: message, payload: job.payload }, { onConflict: "job_run_id" });
       logger.error({ jobId: job.id, jobType: job.job_type, attempt: job.attempt, storyId: job.payload?.storyId, articleId: job.payload?.articleId, durationMs: Date.now() - jobStarted, status: dead ? "DEAD_LETTER" : "QUEUED_RETRY", error: message }, "job_failed");
     }
-    processed++;
-  }
+    },
+  });
   if (automationRun) await client.from("automation_runs").update({ status: "SUCCEEDED", finished_at: new Date().toISOString(), items_processed: processed, metadata: { spend: budget.spend, dailyBudget: budget.dailyBudget, budgetState: budget.state, budgetExceeded: budget.budgetExceeded, conserving: budget.conserving, globalPaused } }).eq("id", automationRun.id);
   return { paused: globalPaused, processed, budgetState: budget.state, budgetExceeded: budget.budgetExceeded, conserving: budget.conserving, estimatedSpendToday: budget.spend };
 }

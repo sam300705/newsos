@@ -36,3 +36,7 @@ Main integration, deployment and public publishing require separate task authori
 ## Phase 3 evidence and publication safety
 
 See [the Phase 3 implementation and verification notes](docs/testing/phase-3-evidence-publication.md). New publication requires versioned exact passages, human support review, an independent approver, complete statement coverage and atomic snapshot/history/outbox writes. Native concurrency CI and live acceptance are recorded separately. Auto-publication remains disabled.
+
+
+## Phase 4 recovery slice (9 October 2026)
+A separate draft PR based on Phase 3 reduces speculative batch claims and adds runtime loop tests. This is not Phase 4 acceptance; durable lease fencing, atomic paid-call admission and outbox reconciliation remain blockers. See `docs/testing/phase-4-recovery-bounded-claims.md`. Do not overwrite the unavailable uncommitted `phase4/durable-jobs-costs` tree.
